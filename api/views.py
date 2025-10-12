@@ -222,16 +222,6 @@ def patch_user_rates(request):
     tags=["Assets: Cash"],
     request=CashAddSerializer,
     responses={201: dict},
-    examples=[
-        {
-            "name": "إضافة 100 USD",
-            "value": {"currency_code": "USD", "amount": "100.0", "notes": "إيداع"},
-        },
-        {
-            "name": "إضافة مع فاتورة Base64",
-            "value": {"currency_code": "USD", "amount": "250.5", "invoice_base64": "data:image/png;base64,iVBOR..."},
-        },
-    ],
 )
 @extend_schema(tags=["Assets: Cash"], request=CashAddSerializer, responses={201: dict})
 @api_view(["POST"])
@@ -451,12 +441,6 @@ def gold_add(request):
     tags=["Assets: Gold"],
     request=GoldWithdrawSerializer,
     responses={201: dict, 400: dict},
-    examples=[
-        {
-            "name": "سحب 3 غرام عيار 21",
-            "value": {"karat": 21, "weight_g": "3.0", "notes": "سحب"},
-        }
-    ],
 )
 @extend_schema(tags=["Assets: Gold"], request=GoldWithdrawSerializer, responses={201: dict, 400: dict})
 @api_view(["POST"])
@@ -917,3 +901,4 @@ def report_transactions(request):
         "results": results,
     }
     return Response(data, status=200)
+
