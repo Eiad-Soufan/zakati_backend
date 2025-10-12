@@ -1,0 +1,13 @@
+Django>=4.2,<5.0
+djangorestframework>=3.14
+drf-spectacular>=0.27
+drf-spectacular-sidecar>=2024.7.1
+djangorestframework-simplejwt>=5.3
+hijri-converter>=2.3
+requests>=2.32
+
+# للنشر على Render / PostgreSQL / ملفات static
+gunicorn>=21.2
+whitenoise>=6.6
+dj-database-url>=2.2
+psycopg2-binary>=2.9
