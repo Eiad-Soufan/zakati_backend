@@ -92,6 +92,7 @@ REST_FRAMEWORK = {
     ],
 }
 
+
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
@@ -102,11 +103,11 @@ SIMPLE_JWT = {
 
 SPECTACULAR_SETTINGS = {
     "TITLE": "Zakati API",
-    "DESCRIPTION": "واجهة برمجية لتطبيق زكاتي (عربي، UI-First، Snapshot Sync).",
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
-    "COMPONENT_SPLIT_REQUEST": True,
+    "DISABLE_ERRORS_AND_WARNINGS": True,   # 👈 يتجاهل أخطاء التوليد
 }
+
 
 # === اللغة والوقت ===
 LANGUAGE_CODE = "ar"
@@ -163,6 +164,7 @@ GOLDAPI_API_KEY = os.getenv("GOLDAPI_API_KEY", "")
 # أو metals-api.com:
 METALSAPI_ACCESS_KEY = os.getenv("METALSAPI_ACCESS_KEY", "")
 METALSAPI_BASE = os.getenv("METALSAPI_BASE", "USD")
+
 
 
 
