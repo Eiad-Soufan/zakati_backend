@@ -1,8 +1,13 @@
-import os, uuid, base64, imghdr, hashlib, json
+import os, uuid, base64, hashlib, json
 from decimal import Decimal
 from django.conf import settings
 from django.utils import timezone
 from django.db.models import Sum
+from io import BytesIO
+from PIL import Image
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
+
 from .models import (
     Profile, UserSettings, Notification,
     MetalPrice, FxRate, Transaction
@@ -13,40 +18,40 @@ from .models import (
 # -----------------------------
 ALLOWED_IMAGE_TYPES = {"jpeg", "png", "webp"}
 MAX_IMAGE_BYTES = 2 * 1024 * 1024  # 2MB
+def _decode_base64_image(data_uri: str):
+    """
+    يقبل 'data:image/png;base64,...' أو Base64 خام.
+    يرجّع: raw bytes + الامتداد ('jpg'/'png'/'webp')
+    """
+    if not data_uri:
+        raise ValueError("empty image")
 
-def save_base64_image_to_media(base64_str: str, subdir: str = "avatars") -> str:
-    if not base64_str:
-        raise ValueError("empty_base64")
-
-    if "," in base64_str and base64_str.strip().startswith("data:"):
-        _, data = base64_str.split(",", 1)
+    # افصل الهيدر لو موجود
+    if "," in data_uri:
+        _, b64 = data_uri.split(",", 1)
     else:
-        data = base64_str
+        b64 = data_uri
 
-    try:
-        raw = base64.b64decode(data, validate=True)
-    except Exception:
-        raise ValueError("invalid_base64")
+    raw = base64.b64decode(b64)
+    # استخدم Pillow لاكتشاف النوع
+    with Image.open(BytesIO(raw)) as img:
+        fmt = (img.format or "").lower()  # 'jpeg','png','webp',...
+    ext = "jpg" if fmt == "jpeg" else fmt
 
-    if len(raw) > MAX_IMAGE_BYTES:
-        raise ValueError("image_too_large")
+    if ext not in ("jpg", "jpeg", "png", "webp"):
+        raise ValueError(f"unsupported image format: {ext}")
+    return raw, ext
 
-    kind = imghdr.what(None, h=raw)
-    if kind == "jpg":
-        kind = "jpeg"
-    if kind not in ALLOWED_IMAGE_TYPES:
-        raise ValueError("unsupported_type")
 
-    fname = f"{uuid.uuid4().hex}.{ 'jpg' if kind=='jpeg' else kind }"
-    rel_dir = os.path.join(subdir, timezone.now().strftime("%Y/%m/%d"))
-    abs_dir = os.path.join(settings.MEDIA_ROOT, rel_dir)
-    os.makedirs(abs_dir, exist_ok=True)
+def save_base64_image_to_media(data_uri: str, folder: str = "uploads") -> str:
+    """
+    يحفظ الصورة عبر DEFAULT storage (Cloudinary عندنا) ويُرجع URL النهائي.
+    """
+    raw, ext = _decode_base64_image(data_uri)
+    filename = f"{folder}/{uuid.uuid4().hex}.{ext}"
+    path = default_storage.save(filename, ContentFile(raw))
+    return default_storage.url(path)
 
-    abs_path = os.path.join(abs_dir, fname)
-    with open(abs_path, "wb") as f:
-        f.write(raw)
-
-    return f"{settings.MEDIA_URL}{rel_dir}/{fname}"
 
 # -----------------------------
 # أسعار ومعاملات مساعدة
