@@ -29,7 +29,6 @@ INSTALLED_APPS = [
     "api",
 ]
 INSTALLED_APPS += ["cloudinary", "cloudinary_storage"]
-DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
@@ -121,7 +120,11 @@ STORAGES = {
     "staticfiles": {
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
     },
+    "default": {
+        "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
+    },
 }
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # === CORS للتطوير ===
@@ -160,4 +163,5 @@ GOLDAPI_API_KEY = os.getenv("GOLDAPI_API_KEY", "")
 # أو metals-api.com:
 METALSAPI_ACCESS_KEY = os.getenv("METALSAPI_ACCESS_KEY", "")
 METALSAPI_BASE = os.getenv("METALSAPI_BASE", "USD")
+
 
