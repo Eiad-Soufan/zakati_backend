@@ -1,18 +1,23 @@
+# Django & REST
 Django>=4.2,<5.0
 djangorestframework>=3.14
 drf-spectacular>=0.27
 drf-spectacular-sidecar>=2024.7.1
 djangorestframework-simplejwt>=5.3
+django-filter>=24.2
+django-cors-headers>=4.4
+
+# Utilities
 hijri-converter>=2.3
 requests>=2.32
+Pillow>=10.4  # لصور Base64/التعامل مع الصور
 
-# للنشر على Render / PostgreSQL / ملفات static
+# Media (Cloudinary)
+django-cloudinary-storage>=0.3.0
+cloudinary>=1.38
+
+# Deploy (Render/Postgres/Static)
 gunicorn>=21.2
 whitenoise>=6.6
 dj-database-url>=2.2
 psycopg2-binary>=2.9
-
-django-cloudinary-storage>=0.3.0
-cloudinary>=1.38
-
-django-filter>=24.2
