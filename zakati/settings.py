@@ -28,6 +28,8 @@ INSTALLED_APPS = [
     # محلي
     "api",
 ]
+INSTALLED_APPS += ["cloudinary", "cloudinary_storage"]
+DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
@@ -158,3 +160,4 @@ GOLDAPI_API_KEY = os.getenv("GOLDAPI_API_KEY", "")
 # أو metals-api.com:
 METALSAPI_ACCESS_KEY = os.getenv("METALSAPI_ACCESS_KEY", "")
 METALSAPI_BASE = os.getenv("METALSAPI_BASE", "USD")
+
