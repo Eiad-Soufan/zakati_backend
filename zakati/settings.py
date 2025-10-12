@@ -7,7 +7,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # === أساسيات ===
 SECRET_KEY = "change-me"
 DEBUG = os.getenv("DEBUG", "true").lower() == "true"
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "").split(",") if not DEBUG else ["*"]
+ALLOWED_HOSTS = ["*"]
 
 
 MEDIA_URL = "/media/"
@@ -163,5 +163,6 @@ GOLDAPI_API_KEY = os.getenv("GOLDAPI_API_KEY", "")
 # أو metals-api.com:
 METALSAPI_ACCESS_KEY = os.getenv("METALSAPI_ACCESS_KEY", "")
 METALSAPI_BASE = os.getenv("METALSAPI_BASE", "USD")
+
 
 
