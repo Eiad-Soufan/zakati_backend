@@ -774,22 +774,28 @@ from decimal import Decimal
 from django.db.models import Sum, Case, When, F, DecimalField, Q
 from .models import Transaction
 
+# --- تجميع محافظ النقد لكل عملة (يعتمد المعاملات الفعّالة فقط) ---
+from decimal import Decimal
+from django.db.models import Sum, Case, When, F, DecimalField
+from .models import Transaction
+
 def compute_cash_wallets(user):
     """
-    يعيد محافظ النقد مُجَمَّعة لكل عملة:
+    يُرجع قائمة محافظ نقدية مُجمَّعة لكل عملة:
     [{"currency_code": "USD", "balance": "123.456000"}, ...]
-    يعتمد على معاملات CASH الفعّالة فقط (غير محذوفة).
+    يعتمد فقط المعاملات غير المحذوفة (soft_deleted_at__isnull=True).
+    ADD = موجب | WITHDRAW/ZAKAT = سالب.
     """
     qs = Transaction.objects.filter(
         user=user,
-        asset_type="CASH",                 # معاملات النقد فقط
-        soft_deleted_at__isnull=True,      # فعّالة فقط
+        asset_type="CASH",
+        soft_deleted_at__isnull=True,
     )
 
     balance_expr = Sum(
         Case(
-            When(operation_type="ADD", then=F("amount")),              # الإضافات +
-            When(operation_type__in=["WITHDRAW", "ZAKAT"], then=-F("amount")),  # السحب/الزكاة -
+            When(operation_type="ADD", then=F("amount")),
+            When(operation_type__in=["WITHDRAW", "ZAKAT"], then=-F("amount")),
             default=Decimal("0"),
             output_field=DecimalField(max_digits=24, decimal_places=10),
         )
@@ -801,9 +807,13 @@ def compute_cash_wallets(user):
 
     wallets = []
     for r in rows:
+        cc = (r["currency_code"] or "").upper()
         bal = r["balance"] or Decimal("0")
-        wallets.append({
-            "currency_code": r["currency_code"],
-            "balance": f"{bal:.6f}",       # تنسيق موحّد 6 منازل
-        })
+        if cc and bal > 0:
+            wallets.append({
+                "currency_code": cc,
+                "balance": f"{bal:.6f}",
+            })
     return wallets
+
+
