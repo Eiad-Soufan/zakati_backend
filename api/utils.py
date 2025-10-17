@@ -767,3 +767,43 @@ def zakat_overview_in_display(user):
         })
 
     return {"portfolio": pf, "zakat": est}
+
+
+# api/utils.py
+from decimal import Decimal
+from django.db.models import Sum, Case, When, F, DecimalField, Q
+from .models import Transaction
+
+def compute_cash_wallets(user):
+    """
+    يعيد محافظ النقد مُجَمَّعة لكل عملة:
+    [{"currency_code": "USD", "balance": "123.456000"}, ...]
+    يعتمد على معاملات CASH الفعّالة فقط (غير محذوفة).
+    """
+    qs = Transaction.objects.filter(
+        user=user,
+        asset_type="CASH",                 # معاملات النقد فقط
+        soft_deleted_at__isnull=True,      # فعّالة فقط
+    )
+
+    balance_expr = Sum(
+        Case(
+            When(operation_type="ADD", then=F("amount")),              # الإضافات +
+            When(operation_type__in=["WITHDRAW", "ZAKAT"], then=-F("amount")),  # السحب/الزكاة -
+            default=Decimal("0"),
+            output_field=DecimalField(max_digits=24, decimal_places=10),
+        )
+    )
+
+    rows = (qs.values("currency_code")
+              .annotate(balance=balance_expr)
+              .order_by("currency_code"))
+
+    wallets = []
+    for r in rows:
+        bal = r["balance"] or Decimal("0")
+        wallets.append({
+            "currency_code": r["currency_code"],
+            "balance": f"{bal:.6f}",       # تنسيق موحّد 6 منازل
+        })
+    return wallets
