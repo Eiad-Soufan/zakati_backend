@@ -125,19 +125,9 @@ def compute_holdings(user):
         silver_g = Decimal("0")
 
     # CASH wallets by currency
-    wallets = []
-    cur_codes = active.filter(asset_type="CASH").values_list("currency_code", flat=True).distinct()
-    for cc in cur_codes:
-        cc = (cc or "").upper()
-        if not cc:
-            continue
-        qs_c = active.filter(asset_type="CASH", currency_code=cc)
-        add_c = qs_c.filter(operation_type="ADD").aggregate(s=Sum("amount"))["s"]
-        out_c = qs_c.filter(operation_type="WITHDRAW").aggregate(s=Sum("amount"))["s"]
-        zak_c = qs_c.filter(operation_type="ZAKAT").aggregate(s=Sum("amount"))["s"]
-        bal = _sum_sign(add_c, out_c, zak_c)
-        if bal > 0:
-            wallets.append({"currency_code": cc, "balance": str(bal)})
+    # CASH wallets (grouped)
+    wallets = compute_cash_wallets(user)
+
 
     gold_by_karat = [{"karat": k, "weight_g": str(gold[k])} for k in (18, 21, 24) if k in gold]
 
@@ -815,5 +805,6 @@ def compute_cash_wallets(user):
                 "balance": f"{bal:.6f}",
             })
     return wallets
+
 
 
