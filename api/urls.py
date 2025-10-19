@@ -31,4 +31,6 @@ urlpatterns = [
     path("reports/portfolio", report_portfolio, name="report_portfolio"),
     path("reports/zakat", report_zakat_overview, name="report_zakat_overview"),
     path("reports/transactions", report_transactions, name="report_transactions"),
+    path("reports/dashboard", ReportsDashboardView.as_view(), name="reports-dashboard"),
 ]
+
