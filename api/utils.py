@@ -808,3 +808,169 @@ def compute_cash_wallets(user):
 
 
 
+# === Pricing helpers for reports ===
+from decimal import Decimal
+from datetime import date
+
+def _get_silver_price_per_gram_in(currency_code: str, user) -> Decimal | None:
+    md = latest_metal_dict()  # USD per gram عادة
+    if not md["silver_g_per"]:
+        return None
+    usd_per_g = Decimal(md["silver_g_per"])
+    target = (currency_code or "USD").upper()
+    if target == "USD":
+        return usd_per_g
+
+    # أولوية: Overrides ثم FxRate
+    rate = None
+    ov = getattr(user.usersettings, "user_fx_overrides", {}) or {}
+    ov_key = f"USD->{target}"
+    if ov_key in ov:
+        try:
+            rate = Decimal(str(ov[ov_key]))
+        except Exception:
+            rate = None
+    if rate is None:
+        fx = latest_fx_for_pairs([("USD", target)])
+        if fx:
+            rate = Decimal(str(fx[0]["rate"]))
+
+    if rate is None:
+        return None
+    return (usd_per_g * rate).quantize(Decimal("0.000001"))
+
+
+def _convert_money(amount: Decimal, base: str, target: str, user) -> Decimal | None:
+    base = (base or "USD").upper()
+    target = (target or "USD").upper()
+    if base == target:
+        return amount
+
+    ov = getattr(user.usersettings, "user_fx_overrides", {}) or {}
+    rate = None
+    ov_key = f"{base}->{target}"
+    if ov_key in ov:
+        try:
+            rate = Decimal(str(ov[ov_key]))
+        except Exception:
+            rate = None
+
+    if rate is None:
+        fx = latest_fx_for_pairs([(base, target)])
+        if fx:
+            rate = Decimal(str(fx[0]["rate"]))
+
+    if rate is None:
+        return None
+    return (amount * rate).quantize(Decimal("0.0000001"))
+
+
+def _parse_period(preset: str | None, dfrom: str | None, dto: str | None) -> tuple[date, date, str | None]:
+    """
+    يحوّل (preset أو من/إلى) إلى تاريخين [from, to] شامِلَين.
+    """
+    from datetime import date, timedelta
+    today = date.today()
+
+    if preset in {"last_month", "last_6_months", "last_year"}:
+        if preset == "last_month":
+            start = date(today.year, today.month, 1)
+            # نهاية الشهر الحالي → استخدم اليوم كحد أعلى
+            end = today
+        elif preset == "last_6_months":
+            # تقريب بسيط: 6*30 يومًا
+            start = today - timedelta(days=6*30)
+            end = today
+        else:  # last_year
+            start = today.replace(month=1, day=1)
+            end = today
+        return start, end, preset
+
+    # تخصيص: كلا التاريخين مطلوبان
+    if dfrom and dto:
+        return date.fromisoformat(dfrom), date.fromisoformat(dto), None
+
+    # افتراضي: آخر شهر
+    start = date(today.year, today.month, 1)
+    return start, today, "last_month"
+
+
+def build_reports_dashboard(user, display_currency: str, date_from: date, date_to: date) -> dict:
+    """
+    يُجمّع التقارير للفترة المطلوبة بنفس شكل واجهة التقارير.
+    - كل القيم المالية بعملة العرض.
+    - الأوزان بالجرام (الواجهة تعرضها KG بقسمة 1000).
+    """
+    from .models import Transaction
+    from django.db.models import Q
+
+    cur = display_currency.upper()
+
+    qs = Transaction.objects.filter(
+        user=user,
+        soft_deleted_at__isnull=True,
+        date__gte=date_from,
+        date__lte=date_to
+    )
+
+    # محضِّرات
+    zero_val = Decimal("0")
+    sections = {
+        "added":     {"gold_v": zero_val, "cash_v": zero_val, "silver_v": zero_val,
+                      "gold_pure_g": zero_val, "silver_g": zero_val},
+        "withdrawn": {"gold_v": zero_val, "cash_v": zero_val, "silver_v": zero_val,
+                      "gold_pure_g": zero_val, "silver_g": zero_val},
+        "zakat_paid":{"gold_v": zero_val, "cash_v": zero_val, "silver_v": zero_val,
+                      "gold_pure_g": zero_val, "silver_g": zero_val},
+    }
+
+    # أسعار الغرام (ذهب/فضة) بعملة العرض
+    gold_ppg = _get_gold_price_per_gram_in(cur, user)      # موجودة سلفًا عندكم
+    silver_ppg = _get_silver_price_per_gram_in(cur, user)
+
+    # Helper: أين نضع المعاملة؟
+    def bucket(op: str):
+        return "added" if op == "ADD" else ("withdrawn" if op == "WITHDRAW" else "zakat_paid")
+
+    for tx in qs:
+        b = sections[bucket(tx.operation_type)]
+
+        if tx.asset_type == "CASH" and tx.amount:
+            cv = _convert_money(Decimal(tx.amount), tx.currency_code, cur, user)
+            if cv is not None:
+                b["cash_v"] += cv
+
+        elif tx.asset_type == "GOLD" and tx.weight_g and tx.karat in (18, 21, 24):
+            pure_g = (Decimal(tx.weight_g) * Decimal(tx.karat) / Decimal(24))
+            b["gold_pure_g"] += pure_g
+            if gold_ppg is not None:
+                b["gold_v"] += (pure_g * gold_ppg)
+
+        elif tx.asset_type == "SILVER" and tx.weight_g:
+            wg = Decimal(tx.weight_g)
+            b["silver_g"] += wg
+            if silver_ppg is not None:
+                b["silver_v"] += (wg * silver_ppg)
+
+    def pack(sec):
+        # نجمع الإجمالي ونُنسّق النصوص
+        total_v = sec["gold_v"] + sec["cash_v"] + sec["silver_v"]
+        return {
+            "title": "",
+            "total_value": f"{total_v.quantize(Decimal('0.01'))}",
+            "gold":   {"value": f"{sec['gold_v'].quantize(Decimal('0.01'))}",
+                       "pure_weight_g": f"{sec['gold_pure_g'].quantize(Decimal('0.000000'))}"},
+            "cash":   {"value": f"{sec['cash_v'].quantize(Decimal('0.01'))}"},
+            "silver": {"value": f"{sec['silver_v'].quantize(Decimal('0.01'))}",
+                       "weight_g": f"{sec['silver_g'].quantize(Decimal('0.000000'))}"},
+        }
+
+    return {
+        "display_currency": cur,
+        "sections": {
+            "added": pack(sections["added"]),
+            "withdrawn": pack(sections["withdrawn"]),
+            "zakat_paid": pack(sections["zakat_paid"]),
+        }
+    }
+
