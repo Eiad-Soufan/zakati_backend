@@ -14,6 +14,21 @@ from .serializers import RatesResponseSerializer
 from .utils import latest_metal_dict, latest_fx_for_pairs
 from .models import UserSettings
 import hashlib, json
+from .serializers import PortfolioReportSerializer, ZakatOverviewSerializer, TransactionsReportSerializer
+from .utils import portfolio_value_in_display, zakat_overview_in_display
+from django.core.paginator import Paginator
+from django.db.models import Q
+# api/views.py
+from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework import status
+from django.utils import timezone
+from urllib.parse import urlencode
+import requests
+
+from drf_spectacular.utils import extend_schema, OpenApiParameter
+from drf_spectacular.types import OpenApiTypes
 
 
 User = get_user_model()
@@ -787,10 +802,8 @@ def transaction_delete(request, pk: int):
     }, status=200)
 
 
-from .serializers import PortfolioReportSerializer, ZakatOverviewSerializer, TransactionsReportSerializer
-from .utils import portfolio_value_in_display, zakat_overview_in_display
-from django.core.paginator import Paginator
-from django.db.models import Q
+
+
 # ========== Reports: Portfolio ==========
 @extend_schema(tags=["Reports"], responses={200: PortfolioReportSerializer})
 @api_view(["GET"])
@@ -901,4 +914,68 @@ def report_transactions(request):
         "results": results,
     }
     return Response(data, status=200)
+
+
+
+
+class ReportsDashboardView(APIView):
+    """
+    واجهة واحدة لتجميع تقارير التقارير (Portfolio + Zakat)
+    بدون الاعتماد على السنابشوت. فقط نقرأ الواجهتين الموجودتين عندك
+    ونُرجع نتيجة موحّدة للفرونت.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["Reports"],
+        description="واجهة التقارير الموحّدة: ترجع نتائج /api/reports/portfolio و /api/reports/zakat معًا.",
+        parameters=[
+            OpenApiParameter(
+                name="display_currency",
+                location=OpenApiParameter.QUERY,
+                required=False,
+                type=OpenApiTypes.STR,
+                description="عملة العرض (إن لم تُرسل نستخدم عملة المستخدم المخزّنة)."
+            ),
+        ],
+        responses={200: None}
+    )
+    def get(self, request):
+        dc = request.query_params.get("display_currency")
+        q = f"?{urlencode({'display_currency': dc})}" if dc else ""
+
+        # نبني روابط الواجهتين الحاليّتين
+        base = request.build_absolute_uri("/")[:-1]  # يحذف الـ slash الأخير
+        url_portfolio = f"{base}/api/reports/portfolio{q}"
+        url_zakat     = f"{base}/api/reports/zakat{q}"
+
+        # نمرّر التوكن نفسه
+        fwd_headers = {}
+        auth = request.headers.get("Authorization") or request.META.get("HTTP_AUTHORIZATION")
+        if auth:
+            fwd_headers["Authorization"] = auth
+
+        # نطلب الواجهتين داخليًا (10 ثواني حد أقصى)
+        try:
+            r1 = requests.get(url_portfolio, headers=fwd_headers, timeout=10)
+            r2 = requests.get(url_zakat,     headers=fwd_headers, timeout=10)
+        except requests.RequestException:
+            return Response({"detail": "تعذّر جلب التقارير داخليًا."}, status=status.HTTP_502_BAD_GATEWAY)
+
+        # التحقق من نجاح الواجهتين
+        if r1.status_code != 200:
+            return Response({"detail": f"فشل تقرير المحفظة ({r1.status_code})."}, status=status.HTTP_502_BAD_GATEWAY)
+        if r2.status_code != 200:
+            return Response({"detail": f"فشل تقرير الزكاة ({r2.status_code})."}, status=status.HTTP_502_BAD_GATEWAY)
+
+        portfolio = r1.json()
+        zakat = r2.json()
+
+        payload = {
+            "display_currency": dc or portfolio.get("display_currency"),
+            "portfolio": portfolio,   # نفس شكل /api/reports/portfolio الحالي
+            "zakat": zakat,           # نفس شكل /api/reports/zakat الحالي
+            "generated_at": timezone.now().isoformat()
+        }
+        return Response(payload, status=status.HTTP_200_OK)
 
