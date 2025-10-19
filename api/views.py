@@ -918,64 +918,55 @@ def report_transactions(request):
 
 
 
-class ReportsDashboardView(APIView):
+# ========== Reports: Dashboard (UI) ==========
+from drf_spectacular.utils import extend_schema, OpenApiParameter
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+
+@extend_schema(
+    tags=["Reports"],
+    parameters=[
+        OpenApiParameter(name="display_currency", required=False, type=str, description="عملة العرض (افتراضيًا من إعدادات المستخدم)"),
+        OpenApiParameter(name="preset", required=False, type=str,
+                         description="last_month | last_6_months | last_year (إن وُجد لا تستعمل من/إلى)"),
+        OpenApiParameter(name="date_from", required=False, type=str, description="YYYY-MM-DD (للتخصيص)"),
+        OpenApiParameter(name="date_to", required=False, type=str, description="YYYY-MM-DD (للتخصيص)"),
+    ],
+    responses={200: dict},
+)
+@api_view(["GET"])
+def report_dashboard(request):
     """
-    واجهة واحدة لتجميع تقارير التقارير (Portfolio + Zakat)
-    بدون الاعتماد على السنابشوت. فقط نقرأ الواجهتين الموجودتين عندك
-    ونُرجع نتيجة موحّدة للفرونت.
+    واجهة موحّدة للتقارير مطابقة للتصميم:
+    - الأصول المضافة / المسحوبة / الزكاة المدفوعة
+    - القيم بعملة العرض + أوزان الذهب الخالص والفضة
+    - فلترة: preset أو date_from/date_to
     """
-    permission_classes = [IsAuthenticated]
+    user = request.user
+    disp = (request.query_params.get("display_currency") or user.usersettings.display_currency).upper()
 
-    @extend_schema(
-        tags=["Reports"],
-        description="واجهة التقارير الموحّدة: ترجع نتائج /api/reports/portfolio و /api/reports/zakat معًا.",
-        parameters=[
-            OpenApiParameter(
-                name="display_currency",
-                location=OpenApiParameter.QUERY,
-                required=False,
-                type=OpenApiTypes.STR,
-                description="عملة العرض (إن لم تُرسل نستخدم عملة المستخدم المخزّنة)."
-            ),
-        ],
-        responses={200: None}
-    )
-    def get(self, request):
-        dc = request.query_params.get("display_currency")
-        q = f"?{urlencode({'display_currency': dc})}" if dc else ""
+    preset = request.query_params.get("preset")
+    dfrom = request.query_params.get("date_from")
+    dto   = request.query_params.get("date_to")
 
-        # نبني روابط الواجهتين الحاليّتين
-        base = request.build_absolute_uri("/")[:-1]  # يحذف الـ slash الأخير
-        url_portfolio = f"{base}/api/reports/portfolio{q}"
-        url_zakat     = f"{base}/api/reports/zakat{q}"
+    try:
+        start, end, resolved = _parse_period(preset, dfrom, dto)
+    except Exception:
+        return Response({"detail": "صيغة التاريخ غير صحيحة."}, status=400)
 
-        # نمرّر التوكن نفسه
-        fwd_headers = {}
-        auth = request.headers.get("Authorization") or request.META.get("HTTP_AUTHORIZATION")
-        if auth:
-            fwd_headers["Authorization"] = auth
+    payload = build_reports_dashboard(user, disp, start, end)
+    payload["period"] = {
+        "preset": resolved,
+        "from": start.isoformat(),
+        "to":   end.isoformat(),
+    }
+    payload["generated_at"] = timezone.now().isoformat()
+    # عنونة العناوين كما في الواجهة
+    payload["sections"]["added"]["title"] = "الأصول المضافة"
+    payload["sections"]["withdrawn"]["title"] = "الأصول المسحوبة"
+    payload["sections"]["zakat_paid"]["title"] = "الزكاة المدفوعة"
 
-        # نطلب الواجهتين داخليًا (10 ثواني حد أقصى)
-        try:
-            r1 = requests.get(url_portfolio, headers=fwd_headers, timeout=10)
-            r2 = requests.get(url_zakat,     headers=fwd_headers, timeout=10)
-        except requests.RequestException:
-            return Response({"detail": "تعذّر جلب التقارير داخليًا."}, status=status.HTTP_502_BAD_GATEWAY)
+    return Response(payload, status=200)
 
-        # التحقق من نجاح الواجهتين
-        if r1.status_code != 200:
-            return Response({"detail": f"فشل تقرير المحفظة ({r1.status_code})."}, status=status.HTTP_502_BAD_GATEWAY)
-        if r2.status_code != 200:
-            return Response({"detail": f"فشل تقرير الزكاة ({r2.status_code})."}, status=status.HTTP_502_BAD_GATEWAY)
 
-        portfolio = r1.json()
-        zakat = r2.json()
-
-        payload = {
-            "display_currency": dc or portfolio.get("display_currency"),
-            "portfolio": portfolio,   # نفس شكل /api/reports/portfolio الحالي
-            "zakat": zakat,           # نفس شكل /api/reports/zakat الحالي
-            "generated_at": timezone.now().isoformat()
-        }
-        return Response(payload, status=status.HTTP_200_OK)
 
