@@ -917,16 +917,20 @@ def report_transactions(request):
 
 
 # ========== Reports: Dashboard (UI) ==========
-from drf_spectacular.utils import extend_schema, OpenApiParameter
+# api/views.py
+
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
+from drf_spectacular.utils import extend_schema, OpenApiParameter
+from django.utils import timezone
+from datetime import date, timedelta
+from .utils import build_reports_dashboard  # تأكد أن الدالة موجودة في utils.py الفعّال
 
 @extend_schema(
     tags=["Reports"],
     parameters=[
-        OpenApiParameter(name="display_currency", required=False, type=str, description="عملة العرض (افتراضيًا من إعدادات المستخدم)"),
-        OpenApiParameter(name="preset", required=False, type=str,
-                         description="last_month | last_6_months | last_year (إن وُجد لا تستعمل من/إلى)"),
+        OpenApiParameter(name="display_currency", required=False, type=str, description="عملة العرض (إن لم تُرسل نستخدم عملة المستخدم)"),
+        OpenApiParameter(name="preset", required=False, type=str, description="last_month | last_6_months | last_year"),
         OpenApiParameter(name="date_from", required=False, type=str, description="YYYY-MM-DD (للتخصيص)"),
         OpenApiParameter(name="date_to", required=False, type=str, description="YYYY-MM-DD (للتخصيص)"),
     ],
@@ -934,37 +938,72 @@ from rest_framework.response import Response
 )
 @api_view(["GET"])
 def report_dashboard(request):
-    """
-    واجهة موحّدة للتقارير مطابقة للتصميم:
-    - الأصول المضافة / المسحوبة / الزكاة المدفوعة
-    - القيم بعملة العرض + أوزان الذهب الخالص والفضة
-    - فلترة: preset أو date_from/date_to
-    """
     user = request.user
-    disp = (request.query_params.get("display_currency") or user.usersettings.display_currency).upper()
 
-    preset = request.query_params.get("preset")
-    dfrom = request.query_params.get("date_from")
-    dto   = request.query_params.get("date_to")
+    # 1) عملة العرض
+    disp = request.query_params.get("display_currency")
+    if not disp:
+        disp = getattr(getattr(user, "usersettings", None), "display_currency", "USD")
+    disp = (disp or "USD").upper()
 
+    # 2) قراءة الفلاتر
+    preset = request.query_params.get("preset") or None
+    dfrom  = request.query_params.get("date_from") or None
+    dto    = request.query_params.get("date_to") or None
+
+    # 3) تحليل الفترة محلياً (آمن)
+    today = date.today()
+    resolved_preset = None
     try:
-        start, end, resolved = _parse_period(preset, dfrom, dto)
-    except Exception:
-        return Response({"detail": "صيغة التاريخ غير صحيحة."}, status=400)
+        if preset in {"last_month", "last_6_months", "last_year"}:
+            resolved_preset = preset
+            if preset == "last_month":
+                start = date(today.year, today.month, 1)
+                end   = today
+            elif preset == "last_6_months":
+                start = today - timedelta(days=6*30)  # تقريب بسيط ومقبول
+                end   = today
+            else:  # last_year
+                start = today.replace(month=1, day=1)
+                end   = today
+        elif dfrom and dto:
+            # تخصيص
+            start = date.fromisoformat(dfrom)
+            end   = date.fromisoformat(dto)
+            if end < start:
+                return Response({"detail": "date_to يجب أن يكون >= date_from."}, status=400)
+        else:
+            # افتراضي: آخر شهر
+            resolved_preset = "last_month"
+            start = date(today.year, today.month, 1)
+            end   = today
+    except ValueError:
+        return Response({"detail": "صيغة التاريخ غير صحيحة. استخدم YYYY-MM-DD."}, status=400)
 
-    payload = build_reports_dashboard(user, disp, start, end)
-    payload["period"] = {
-        "preset": resolved,
-        "from": start.isoformat(),
-        "to":   end.isoformat(),
+    # 4) بناء التقرير
+    ui = build_reports_dashboard(user, disp, start, end)  # تأكد أن هذه الدالة موجودة فعليًا في utils.py (انظر الخطوة 2)
+    # عنوان البطاقات
+    ui.setdefault("sections", {})
+    ui["sections"].setdefault("added", {}).setdefault("title", "الأصول المضافة")
+    ui["sections"].setdefault("withdrawn", {}).setdefault("title", "الأصول المسحوبة")
+    ui["sections"].setdefault("zakat_paid", {}).setdefault("title", "الزكاة المدفوعة")
+
+    payload = {
+        "display_currency": disp,
+        "period": {
+            "preset": resolved_preset,
+            "from": start.isoformat(),
+            "to":   end.isoformat(),
+        },
+        "sections": {
+            "added": ui["sections"].get("added", {}),
+            "withdrawn": ui["sections"].get("withdrawn", {}),
+            "zakat_paid": ui["sections"].get("zakat_paid", {}),
+        },
+        "generated_at": timezone.now().isoformat(),
     }
-    payload["generated_at"] = timezone.now().isoformat()
-    # عنونة العناوين كما في الواجهة
-    payload["sections"]["added"]["title"] = "الأصول المضافة"
-    payload["sections"]["withdrawn"]["title"] = "الأصول المسحوبة"
-    payload["sections"]["zakat_paid"]["title"] = "الزكاة المدفوعة"
-
     return Response(payload, status=200)
+
 
 
 
