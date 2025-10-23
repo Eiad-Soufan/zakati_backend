@@ -11,11 +11,9 @@ from .models import *
 from .utils import *
 
 from .serializers import RatesResponseSerializer
-from .utils import latest_metal_dict, latest_fx_for_pairs
 from .models import UserSettings
 import hashlib, json
 from .serializers import PortfolioReportSerializer, ZakatOverviewSerializer, TransactionsReportSerializer
-from .utils import portfolio_value_in_display, zakat_overview_in_display
 from django.core.paginator import Paginator
 from django.db.models import Q
 # api/views.py
@@ -967,6 +965,7 @@ def report_dashboard(request):
     payload["sections"]["zakat_paid"]["title"] = "الزكاة المدفوعة"
 
     return Response(payload, status=200)
+
 
 
 
